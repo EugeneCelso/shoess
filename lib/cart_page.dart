@@ -159,13 +159,7 @@ class _CartPageState extends State<CartPage> {
                 title: Text('Payment Successful! 🎉'),
                 content: Text('Your order has been placed and will be delivered soon.'),
                 actions: [
-                  CupertinoDialogAction(
-                    child: Text('Track Order'),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      // Switch to orders tab (index 2)
-                    },
-                  ),
+
                   CupertinoDialogAction(
                     child: Text('Continue Shopping'),
                     onPressed: () => Navigator.pop(context),

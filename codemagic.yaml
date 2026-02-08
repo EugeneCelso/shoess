@@ -1,9 +1,8 @@
-
 workflows:
-  ios-free-build-optimized:
-    name: iOS Unsigned (Clean Version)
-    max_build_duration: 120
-    instance_type: mac_mini_m1
+  android-free-build-optimized:
+    name: Android Unsigned (Clean Version)
+    max_build_duration: 60
+    instance_type: default
     environment:
       flutter: stable
       groups:
@@ -13,17 +12,19 @@ workflows:
         script: flutter packages pub get
       - name: Build & Package
         script: |
-          # 1. Build the app bundle
-          flutter build ios --release --no-codesign
+          # 1. Clean previous builds
+          flutter clean
 
-          # 2. Set up variables to avoid hardcoding "Runner"
-          APP_NAME=$(find build/ios/iphoneos -name "*.app" | head -n 1)
+          # 2. Build the release APK
+          flutter build apk --release
 
-          # 3. Create IPA structure
-          mkdir -p build/ios/iphoneos/Payload
-          cp -r "$APP_NAME" build/ios/iphoneos/Payload/
+          # 3. Set up variables to avoid hardcoding APK name
+          APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" | head -n 1)
 
-          # 4. Zip it up
-          cd build/ios/iphoneos && zip -r unsigned_app.ipa Payload
+          # 4. Create output folder for artifacts
+          mkdir -p build/android/apk
+
+          # 5. Copy APK to artifacts folder
+          cp "$APK_PATH" build/android/apk/app-release.apk
     artifacts:
-      - build/ios/iphoneos/unsigned_app.ipa
+      - build/android/apk/app-release.apk

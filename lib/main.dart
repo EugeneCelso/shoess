@@ -1,10 +1,29 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
+import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:local_auth/local_auth.dart';
 import 'homepage.dart';
 import 'cart_page.dart';
 import 'about_page.dart';
 import 'orders_page.dart';
+import 'signup_page.dart';
+import 'profile_page.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  final box = await Hive.openBox("shoestore_db");
+
+  // Initialize default values if first time
+  if (box.get("isDark") == null) {
+    box.put("isDark", true);
+  }
+  if (box.get("biometrics") == null) {
+    box.put("biometrics", false);
+  }
+
+  print("Logged in user: ${box.get("username")}");
   runApp(MyApp());
 }
 
@@ -16,29 +35,405 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  final box = Hive.box("shoestore_db");
+
+  @override
+  Widget build(BuildContext context) {
+    // Check if user is logged in
+    bool isLoggedIn = box.get("username") != null;
+
+    return CupertinoApp(
+      debugShowCheckedModeBanner: false,
+      theme: CupertinoThemeData(
+        brightness: Brightness.dark,
+        primaryColor: CupertinoColors.systemGrey,
+      ),
+      home: isLoggedIn ? LoginPage() : SignupPage(),
+    );
+  }
+}
+
+// Login Page
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final LocalAuthentication auth = LocalAuthentication();
+  final box = Hive.box("shoestore_db");
+
+  final TextEditingController _username = TextEditingController();
+  final TextEditingController _password = TextEditingController();
+
+  String errorMsg = "";
+  bool hidePassword = true;
+  bool isDark = true;
+
+  @override
+  void initState() {
+    super.initState();
+    isDark = box.get("isDark", defaultValue: true);
+  }
+
+  Future<void> _authenticateWithBiometrics() async {
+    try {
+      final bool canAuthenticate = await auth.canCheckBiometrics ||
+          await auth.isDeviceSupported();
+
+      if (!canAuthenticate) {
+        setState(() {
+          errorMsg = "Biometrics not available on this device";
+        });
+        return;
+      }
+
+      final bool didAuthenticate = await auth.authenticate(
+        localizedReason: 'Please authenticate to login',
+        biometricOnly: true,
+      );
+
+      if (didAuthenticate) {
+        _username.text = box.get("username");
+        _password.text = box.get("password");
+        _login();
+      } else {
+        setState(() {
+          errorMsg = "Authentication failed";
+        });
+      }
+    } catch (e) {
+      setState(() {
+        errorMsg = "Biometric error: ${e.toString()}";
+      });
+    }
+  }
+
+  void _login() {
+    if (_username.text.trim() == box.get("username") &&
+        _password.text.trim() == box.get("password")) {
+      setState(() {
+        errorMsg = "";
+      });
+      Navigator.pushReplacement(
+        context,
+        CupertinoPageRoute(builder: (context) => MainApp()),
+      );
+    } else {
+      setState(() {
+        errorMsg = "Invalid username or password";
+      });
+    }
+  }
+
+  void _resetData() {
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: Text("Reset All Data"),
+        content: Text(
+            "Are you sure you want to delete all registered local data?"),
+        actions: [
+          CupertinoDialogAction(
+            child: Text('Close'),
+            onPressed: () => Navigator.pop(context),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            child: Text('Yes'),
+            onPressed: () {
+              Navigator.pop(context);
+              // Delete all data
+              box.delete("username");
+              box.delete("password");
+              box.delete("email");
+              box.delete("fullName");
+              box.delete("biometrics");
+              box.delete("cartItems");
+              box.delete("orderHistory");
+              box.delete("accountCreated");
+              box.put("isDark", true);
+
+              // Trigger rebuild to show signup button
+              setState(() {});
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      backgroundColor: isDark ? Color(0xFF000000) : CupertinoColors.white,
+      child: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Logo
+              Center(
+                child: ShaderMask(
+                  shaderCallback: (bounds) => LinearGradient(
+                    colors: isDark
+                        ? [CupertinoColors.white, Color(0xFFAAAAAA)]
+                        : [CupertinoColors.black, Color(0xFF555555)],
+                  ).createShader(bounds),
+                  child: Text(
+                    'REALE\$T',
+                    style: TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 3,
+                      color: CupertinoColors.white,
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(height: 8),
+              Center(
+                child: Text(
+                  'Premium Footwear Collection',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: CupertinoColors.systemGrey,
+                  ),
+                ),
+              ),
+              SizedBox(height: 60),
+              Text(
+                'Login',
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? CupertinoColors.white : CupertinoColors.black,
+                ),
+              ),
+              SizedBox(height: 24),
+
+              // Username
+              CupertinoTextField(
+                controller: _username,
+                placeholder: "Username",
+                prefix: Padding(
+                  padding: EdgeInsets.only(left: 12),
+                  child: Icon(CupertinoIcons.person, size: 20),
+                ),
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isDark ? Color(0xFF1C1C1E) : CupertinoColors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: isDark ? null : Border.all(color: CupertinoColors.systemGrey4, width: 1),
+                ),
+                style: TextStyle(
+                  color: isDark ? CupertinoColors.white : CupertinoColors.black,
+                ),
+              ),
+              SizedBox(height: 12),
+
+              // Password
+              CupertinoTextField(
+                controller: _password,
+                placeholder: "Password",
+                obscureText: hidePassword,
+                prefix: Padding(
+                  padding: EdgeInsets.only(left: 12),
+                  child: Icon(CupertinoIcons.lock, size: 20),
+                ),
+                suffix: CupertinoButton(
+                  padding: EdgeInsets.only(right: 8),
+                  child: Icon(
+                    hidePassword ? CupertinoIcons.eye : CupertinoIcons.eye_slash,
+                    size: 20,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      hidePassword = !hidePassword;
+                    });
+                  },
+                ),
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isDark ? Color(0xFF1C1C1E) : CupertinoColors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: isDark ? null : Border.all(color: CupertinoColors.systemGrey4, width: 1),
+                ),
+                style: TextStyle(
+                  color: isDark ? CupertinoColors.white : CupertinoColors.black,
+                ),
+              ),
+              SizedBox(height: 24),
+
+              // Sign In Button
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: _login,
+                child: Container(
+                  width: double.infinity,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: isDark
+                          ? [CupertinoColors.white, Color(0xFFDDDDDD)]
+                          : [CupertinoColors.black, Color(0xFF333333)],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'SIGN IN',
+                      style: TextStyle(
+                        color: isDark
+                            ? CupertinoColors.black
+                            : CupertinoColors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // Biometric Login - Show only if enabled
+              if (box.get("biometrics", defaultValue: false))
+                Center(
+                  child: CupertinoButton(
+                    child: Column(
+                      children: [
+                        Icon(CupertinoIcons.lock_shield_fill, size: 40),
+                        SizedBox(height: 4),
+                        Text('Login with Biometrics',
+                            style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                    onPressed: _authenticateWithBiometrics,
+                  ),
+                ),
+
+              // Error Message
+              if (errorMsg.isNotEmpty)
+                Center(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text(
+                      errorMsg,
+                      style: TextStyle(
+                        color: Color(0xFFFF3B30),
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+
+              Spacer(),
+
+              // Bottom Actions
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    child: Text('Reset Data'),
+                    onPressed: _resetData,
+                  ),
+                  // Only show Sign Up button if no user is registered
+                  if (box.get("username") == null)
+                    CupertinoButton(
+                      padding: EdgeInsets.zero,
+                      child: Text('Sign Up'),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          CupertinoPageRoute(builder: (context) => SignupPage()),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Main App with Tab Navigation
+class MainApp extends StatefulWidget {
+  const MainApp({super.key});
+
+  @override
+  State<MainApp> createState() => _MainAppState();
+}
+
+class _MainAppState extends State<MainApp> {
+  final box = Hive.box("shoestore_db");
   bool isDark = true;
   List<Map<String, dynamic>> cartItems = [];
   List<Map<String, dynamic>> orderHistory = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  void _loadData() {
+    setState(() {
+      isDark = box.get("isDark", defaultValue: true);
+
+      // Load cart items with proper type casting
+      final savedCart = box.get("cartItems");
+      if (savedCart != null) {
+        cartItems = (savedCart as List)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+      }
+
+      // Load order history with proper type casting
+      final savedOrders = box.get("orderHistory");
+      if (savedOrders != null) {
+        orderHistory = (savedOrders as List)
+            .map((order) => Map<String, dynamic>.from(order as Map))
+            .toList();
+      }
+    });
+  }
+
+  void _saveCart() {
+    box.put("cartItems", cartItems);
+  }
+
+  void _saveOrders() {
+    box.put("orderHistory", orderHistory);
+  }
 
   void addToCart(Map<String, dynamic> shoe) {
     setState(() {
       int existingIndex = cartItems.indexWhere((item) =>
       item['name'] == shoe['name'] &&
           item['selectedSize'] == shoe['selectedSize'] &&
-          item['selectedColor'] == shoe['selectedColor']
-      );
+          item['selectedColor'] == shoe['selectedColor']);
 
       if (existingIndex != -1) {
         cartItems[existingIndex]['quantity']++;
       } else {
         cartItems.add({...shoe, 'quantity': 1});
       }
+      _saveCart();
     });
   }
 
   void removeFromCart(int index) {
     setState(() {
       cartItems.removeAt(index);
+      _saveCart();
     });
   }
 
@@ -49,12 +444,14 @@ class _MyAppState extends State<MyApp> {
       } else {
         cartItems[index]['quantity'] = quantity;
       }
+      _saveCart();
     });
   }
 
   void clearCart() {
     setState(() {
       cartItems.clear();
+      _saveCart();
     });
   }
 
@@ -62,498 +459,136 @@ class _MyAppState extends State<MyApp> {
     setState(() {
       orderHistory.insert(0, {
         'orderId': 'ORD${DateTime.now().millisecondsSinceEpoch}',
-        'items': List.from(items),
+        'items': items.map((item) => Map<String, dynamic>.from(item)).toList(),
         'total': total,
-        'date': DateTime.now(),
+        'date': DateTime.now().toIso8601String(),
         'status': 'Processing',
-        'trackingNumber': 'TRK${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}',
-        'estimatedDelivery': DateTime.now().add(Duration(days: 3)),
+        'trackingNumber':
+        'TRK${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}',
+        'estimatedDelivery':
+        DateTime.now().add(Duration(days: 3)).toIso8601String(),
         'shippingAddress': 'San Nicolas, Santa Ana, PH',
       });
+      _saveOrders();
     });
   }
 
   void toggleTheme() {
     setState(() {
       isDark = !isDark;
+      box.put("isDark", isDark);
     });
-  }
-
-  Widget tiles(IconData icon, String title, dynamic trailing, Color color, VoidCallback? onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: EdgeInsets.only(bottom: 12),
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: BoxDecoration(
-          gradient: isDark
-              ? LinearGradient(
-            colors: [
-              Color(0xFF1C1C1E),
-              Color(0xFF2C2C2E),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          )
-              : null,
-          color: isDark ? null : CupertinoColors.systemGrey6,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: isDark
-              ? [
-            BoxShadow(
-              color: CupertinoColors.black.withOpacity(0.3),
-              blurRadius: 10,
-              offset: Offset(0, 4),
-            )
-          ]
-              : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: LinearGradient(
-                  colors: [color, color.withOpacity(0.7)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Icon(
-                icon,
-                size: 20,
-                color: CupertinoColors.white,
-              ),
-            ),
-            SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? CupertinoColors.white : CupertinoColors.black,
-                ),
-              ),
-            ),
-            trailing is Widget ? trailing : SizedBox.shrink(),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return CupertinoApp(
-      debugShowCheckedModeBanner: false,
-      theme: CupertinoThemeData(
-        brightness: isDark ? Brightness.dark : Brightness.light,
-        primaryColor: CupertinoColors.systemGrey,
-        scaffoldBackgroundColor: isDark
-            ? Color(0xFF000000)
-            : CupertinoColors.white,
-        barBackgroundColor: isDark
-            ? Color(0xFF1C1C1E)
-            : CupertinoColors.lightBackgroundGray,
-      ),
-      home: CupertinoTabScaffold(
-        tabBar: CupertinoTabBar(
-          backgroundColor: isDark
-              ? Color(0xFF1C1C1E)
-              : CupertinoColors.white,
-          activeColor: isDark ? CupertinoColors.white : CupertinoColors.black,
-          items: [
-            BottomNavigationBarItem(
-              icon: Icon(CupertinoIcons.home),
-              label: "Home",
-            ),
-            BottomNavigationBarItem(
-              icon: Stack(
-                children: [
-                  Icon(CupertinoIcons.cart),
-                  if (cartItems.isNotEmpty)
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      child: Container(
-                        padding: EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Color(0xFFFF3B30), Color(0xFFFF6B6B)],
-                          ),
-                          borderRadius: BorderRadius.circular(10),
+    return CupertinoTabScaffold(
+      tabBar: CupertinoTabBar(
+        backgroundColor: isDark ? Color(0xFF1C1C1E) : CupertinoColors.white,
+        activeColor: isDark ? CupertinoColors.white : CupertinoColors.black,
+        items: [
+          BottomNavigationBarItem(
+            icon: Icon(CupertinoIcons.home),
+            label: "Home",
+          ),
+          BottomNavigationBarItem(
+            icon: Stack(
+              children: [
+                Icon(CupertinoIcons.cart),
+                if (cartItems.isNotEmpty)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      padding: EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFFFF3B30), Color(0xFFFF6B6B)],
                         ),
-                        constraints: BoxConstraints(
-                          minWidth: 16,
-                          minHeight: 16,
-                        ),
-                        child: Text(
-                          '${cartItems.length}',
-                          style: TextStyle(
-                            color: CupertinoColors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                    ),
-                ],
-              ),
-              label: "Cart",
-            ),
-            BottomNavigationBarItem(
-              icon: Stack(
-                children: [
-                  Icon(CupertinoIcons.cube_box),
-                  if (orderHistory.isNotEmpty)
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: Color(0xFF34C759),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
+                      constraints: BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
                       ),
-                    ),
-                ],
-              ),
-              label: "Orders",
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(CupertinoIcons.settings),
-              label: "Settings",
-            ),
-          ],
-        ),
-        tabBuilder: (context, index) {
-          switch (index) {
-            case 0:
-              return Homepage(
-                onAddToCart: addToCart,
-                isDark: isDark,
-              );
-            case 1:
-              return CartPage(
-                cartItems: cartItems,
-                onRemoveItem: removeFromCart,
-                onUpdateQuantity: updateQuantity,
-                onClearCart: clearCart,
-                onOrderPlaced: addToOrderHistory,
-                isDark: isDark,
-              );
-            case 2:
-              return OrdersPage(
-                orders: orderHistory,
-                isDark: isDark,
-              );
-            case 3:
-              return CupertinoPageScaffold(
-                backgroundColor: isDark ? Color(0xFF000000) : CupertinoColors.white,
-                child: Container(
-                  decoration: isDark
-                      ? BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Color(0xFF000000),
-                        Color(0xFF1C1C1E),
-                        Color(0xFF000000),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                  )
-                      : null,
-                  child: SafeArea(
-                    child: ListView(
-                      padding: EdgeInsets.all(20),
-                      children: [
-                        SizedBox(height: 10),
-
-                        // Profile Section
-                        Container(
-                          padding: EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            gradient: isDark
-                                ? LinearGradient(
-                              colors: [
-                                Color(0xFF1C1C1E),
-                                Color(0xFF2C2C2E),
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            )
-                                : null,
-                            color: isDark ? null : CupertinoColors.systemGrey6,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: isDark
-                                ? [
-                              BoxShadow(
-                                color: CupertinoColors.black.withOpacity(0.5),
-                                blurRadius: 20,
-                                offset: Offset(0, 10),
-                              )
-                            ]
-                                : null,
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 70,
-                                height: 70,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: isDark
-                                        ? [Color(0xFF3C3C3E), Color(0xFF2C2C2E)]
-                                        : [CupertinoColors.white, CupertinoColors.systemGrey6],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '👤',
-                                    style: TextStyle(fontSize: 35),
-                                  ),
-                                ),
-                              ),
-                              SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Mr.Rico Suave ',
-                                      style: TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w900,
-                                        color: isDark
-                                            ? CupertinoColors.white
-                                            : CupertinoColors.black,
-                                      ),
-                                    ),
-                                    SizedBox(height: 4),
-                                    Text(
-                                      'ricosuave@reale\$t.ph',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: CupertinoColors.systemGrey,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                      child: Text(
+                        '${cartItems.length}',
+                        style: TextStyle(
+                          color: CupertinoColors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
                         ),
-
-                        SizedBox(height: 30),
-
-                        // Appearance Section
-                        Text(
-                          'APPEARANCE',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
-                            color: CupertinoColors.systemGrey,
-                          ),
-                        ),
-                        SizedBox(height: 12),
-
-                        tiles(
-                          CupertinoIcons.moon_fill,
-                          'Dark Mode',
-                          CupertinoSwitch(
-                            value: isDark,
-                            onChanged: (value) => toggleTheme(),
-                            activeColor: CupertinoColors.white,
-                          ),
-                          Color(0xFF5E5CE6),
-                          null,
-                        ),
-
-                        SizedBox(height: 30),
-
-                        // General Section
-                        Text(
-                          'GENERAL',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
-                            color: CupertinoColors.systemGrey,
-                          ),
-                        ),
-                        SizedBox(height: 12),
-
-                        tiles(
-                          CupertinoIcons.info_circle_fill,
-                          'About',
-                          Icon(
-                            CupertinoIcons.chevron_forward,
-                            color: CupertinoColors.systemGrey,
-                            size: 20,
-                          ),
-                          Color(0xFF007AFF),
-                              () {
-                            Navigator.push(
-                              context,
-                              CupertinoPageRoute(
-                                builder: (context) => AboutPage(isDark: isDark),
-                              ),
-                            );
-                          },
-                        ),
-
-                        tiles(
-                          CupertinoIcons.bell_fill,
-                          'Notifications',
-                          Icon(
-                            CupertinoIcons.chevron_forward,
-                            color: CupertinoColors.systemGrey,
-                            size: 20,
-                          ),
-                          Color(0xFFFF9500),
-                              () {
-                            showCupertinoDialog(
-                              context: context,
-                              builder: (context) => CupertinoAlertDialog(
-                                title: Text('Notifications'),
-                                content: Text('Get notified about order updates, new arrivals, and exclusive deals!'),
-                                actions: [
-                                  CupertinoDialogAction(
-                                    child: Text('OK'),
-                                    onPressed: () => Navigator.pop(context),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-
-                        tiles(
-                          CupertinoIcons.location_fill,
-                          'Shipping Address',
-                          Icon(
-                            CupertinoIcons.chevron_forward,
-                            color: CupertinoColors.systemGrey,
-                            size: 20,
-                          ),
-                          Color(0xFF34C759),
-                              () {
-                            showCupertinoDialog(
-                              context: context,
-                              builder: (context) => CupertinoAlertDialog(
-                                title: Text('Shipping Address'),
-                                content: Text('San Nicolas, Sta Ana, PH\n+63 961 605 7988'),
-                                actions: [
-                                  CupertinoDialogAction(
-                                    child: Text('OK'),
-                                    onPressed: () => Navigator.pop(context),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-
-                        tiles(
-                          CupertinoIcons.padlock_solid,
-                          'Secret Key',
-                          Icon(
-                            CupertinoIcons.chevron_forward,
-                            color: CupertinoColors.systemGrey,
-                            size: 20,
-                          ),
-                          Color(0xFF5856D6),
-                              () {
-                            showCupertinoDialog(
-                              context: context,
-                              builder: (context) => CupertinoAlertDialog(
-                                title: Text('Secret Key'),
-                                content: Text('Manage your Xendit payment API keys securely.'),
-                                actions: [
-                                  CupertinoDialogAction(
-                                    child: Text('OK'),
-                                    onPressed: () => Navigator.pop(context),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-
-                        SizedBox(height: 30),
-
-                        // Support Section
-                        Text(
-                          'SUPPORT',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
-                            color: CupertinoColors.systemGrey,
-                          ),
-                        ),
-                        SizedBox(height: 12),
-
-                        tiles(
-                          CupertinoIcons.chat_bubble_fill,
-                          'Help & Support',
-                          Icon(
-                            CupertinoIcons.chevron_forward,
-                            color: CupertinoColors.systemGrey,
-                            size: 20,
-                          ),
-                          Color(0xFF32ADE6),
-                              () {
-                            showCupertinoDialog(
-                              context: context,
-                              builder: (context) => CupertinoAlertDialog(
-                                title: Text('Help & Support'),
-                                content: Text('Contact us at:\nsupport@kicks.ph\n+63 961 605 7988'),
-                                actions: [
-                                  CupertinoDialogAction(
-                                    child: Text('OK'),
-                                    onPressed: () => Navigator.pop(context),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-
-                        SizedBox(height: 30),
-
-
-
-                        Center(
-                          child: Text(
-                            'REALE\$T v2.0',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: CupertinoColors.systemGrey2,
-                              letterSpacing: 1,
-                            ),
-                          ),
-                        ),
-                      ],
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
-                ),
-              );
-            default:
-              return Container();
-          }
-        },
+              ],
+            ),
+            label: "Cart",
+          ),
+          BottomNavigationBarItem(
+            icon: Stack(
+              children: [
+                Icon(CupertinoIcons.cube_box),
+                if (orderHistory.isNotEmpty)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: Color(0xFF34C759),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: "Orders",
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(CupertinoIcons.person_circle),
+            label: "Profile",
+          ),
+        ],
       ),
+      tabBuilder: (context, index) {
+        switch (index) {
+          case 0:
+            return Homepage(
+              onAddToCart: addToCart,
+              isDark: isDark,
+            );
+          case 1:
+            return CartPage(
+              cartItems: cartItems,
+              onRemoveItem: removeFromCart,
+              onUpdateQuantity: updateQuantity,
+              onClearCart: clearCart,
+              onOrderPlaced: addToOrderHistory,
+              isDark: isDark,
+            );
+          case 2:
+            return OrdersPage(
+              orders: orderHistory.map((order) {
+                return {
+                  ...order,
+                  'date': DateTime.parse(order['date']),
+                  'estimatedDelivery': DateTime.parse(order['estimatedDelivery']),
+                };
+              }).toList(),
+              isDark: isDark,
+            );
+          case 3:
+            return ProfilePage(
+              isDark: isDark,
+              onToggleTheme: toggleTheme,
+            );
+          default:
+            return Container();
+        }
+      },
     );
   }
 }
