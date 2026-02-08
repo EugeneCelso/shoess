@@ -2,29 +2,22 @@ workflows:
   android-free-build-optimized:
     name: Android Unsigned (Clean Version)
     max_build_duration: 60
-    instance_type: default
+    instance_type: linux
     environment:
       flutter: stable
       groups:
-        - magic_vars # Optional: Store app names here
+        - magic_vars
     scripts:
       - name: Initialize
-        script: flutter packages pub get
+        script: flutter pub get
       - name: Build & Package
         script: |
-          # 1. Clean previous builds
           flutter clean
-
-          # 2. Build the release APK
           flutter build apk --release
 
-          # 3. Set up variables to avoid hardcoding APK name
           APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" | head -n 1)
 
-          # 4. Create output folder for artifacts
           mkdir -p build/android/apk
-
-          # 5. Copy APK to artifacts folder
           cp "$APK_PATH" build/android/apk/app-release.apk
     artifacts:
       - build/android/apk/app-release.apk
