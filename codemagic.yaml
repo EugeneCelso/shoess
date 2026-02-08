@@ -5,19 +5,17 @@ workflows:
     instance_type: linux
     environment:
       flutter: stable
-      groups:
-        - magic_vars
     scripts:
-      - name: Initialize
+      - name: Get dependencies
         script: flutter pub get
-      - name: Build & Package
+
+      - name: Build APK
         script: |
           flutter clean
           flutter build apk --release
 
-          APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" | head -n 1)
-
           mkdir -p build/android/apk
-          cp "$APK_PATH" build/android/apk/app-release.apk
+          cp build/app/outputs/flutter-apk/app-release.apk build/android/apk/app-release.apk
+
     artifacts:
       - build/android/apk/app-release.apk
